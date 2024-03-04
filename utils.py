@@ -146,7 +146,6 @@ def get_physionet_data(args, device, q, flag=1):
     record_id, tt, vals, mask, labels = train_data[0]
 
     # n_samples = len(total_dataset) 특성 숫자/텐서의 마지막 차원
-    num_tp = tt.size(-1)
     input_dim = vals.size(-1)
     data_min, data_max = get_data_min_max(total_dataset, device)
     batch_size = min(min(len(train_dataset_obj), args.batch_size), args.n)
@@ -161,6 +160,8 @@ def get_physionet_data(args, device, q, flag=1):
                 train_data, device, classify=args.classif, data_min=data_min, data_max=data_max)
             val_data_combined = variable_time_collate_fn(
                 val_data, device, classify=args.classif, data_min=data_min, data_max=data_max)
+            num_tp = train_data_combined[0].size(1)
+
             print(train_data_combined[1].sum(
             ), val_data_combined[1].sum(), test_data_combined[1].sum())
             print(train_data_combined[0].size(), train_data_combined[1].size(),

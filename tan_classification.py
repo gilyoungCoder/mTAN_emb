@@ -78,6 +78,7 @@ if __name__ == '__main__':
     val_loader = data_obj["val_dataloader"]
     dim = data_obj["input_dim"]
     num_tp = data_obj["num_tp"]
+    print(f"num tp : {num_tp}")
     # if args.enc == 'enc_rnn3':
     #     rec = models.enc_rnn3(
     #         dim, torch.linspace(0, 1., 128), args.latent_dim, args.rec_hidden, 128, learn_emb=args.learn_emb).to(device)

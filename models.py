@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from setmodels import SetTransformer
+import random
 
 class create_classifier(nn.Module):
  
@@ -81,6 +82,35 @@ class multiTimeAttention(nn.Module):
         return self.linears[-1](x)
     
     
+class TimeSeriesAugmentation(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, embed_time, num_outputs):
+        super(TimeSeriesAugmentation, self).__init__()
+        # 숨겨진 표현을 추출하기 위한 초기 변환 레이어
+        self.initial_transform = nn.Linear(input_dim, hidden_dim)
+        self.dim = input_dim
+        self.embed_time = embed_time
+        # Set Transformer 모델
+        self.set_transformer = SetTransformer(dim_input=hidden_dim, num_outputs=num_outputs, dim_output=hidden_dim)
+        
+        # 증폭된 숨겨진 표현을 (t, x) 형식으로 변환하기 위한 레이어
+        self.final_transform = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, t, x):
+        # t와 x를 concatenate하여 초기 변환 레이어에 입력
+        tx = torch.cat([x, t.unsqueeze(-1)], dim=-1)
+        hidden_representation = self.initial_transform(tx)
+        
+        # Set Transformer를 사용하여 숨겨진 표현 증폭
+        augmented_representation = self.set_transformer(hidden_representation)
+        
+        # 증폭된 숨겨진 표현을 (t, x) 형식으로 변환
+        output = self.final_transform(augmented_representation)
+        
+        # 새로운 t와 x 분리
+        new_x, new_t = output[ :, :, :self.dim-1], output[:, :, -1]
+        return new_x, new_t
+
+    
 class enc_mtan_rnn(nn.Module):
     def __init__(self, input_dim, query, num_outputs, latent_dim=2, nhidden=16, 
                  embed_time=16, num_heads=1, learn_emb=False, device='cuda'):
@@ -93,7 +123,7 @@ class enc_mtan_rnn(nn.Module):
         self.learn_emb = learn_emb
         self.att = multiTimeAttention(2*input_dim, nhidden, embed_time, num_heads)
         self.gru_rnn = nn.GRU(nhidden, nhidden, bidirectional=True, batch_first=True)
-        self.aug = SetTransformer(dim_input=input_dim*2+embed_time, num_outputs=num_outputs, dim_output=input_dim*2+embed_time)
+        self.aug = TimeSeriesAugmentation(input_dim = input_dim*2+1, hidden_dim = 256, output_dim = input_dim*2+1, embed_time=1, num_outputs=num_outputs)
 
         self.hiddens_to_z0 = nn.Sequential(
             nn.Linear(2*nhidden, 50),
@@ -123,8 +153,30 @@ class enc_mtan_rnn(nn.Module):
         pe[:, :, 1::2] = torch.cos(position * div_term)
         return pe
        
-    def forward(self, x, time_steps):
+    def forward(self, x, t):
+        x_aug, time_steps = self.aug(t, x)
+        
+        x_copy = x_aug.clone()
+
         time_steps = time_steps.cpu()
+        
+        x_aug[:, :, self.dim:2*self.dim] = torch.where(
+            x_aug[:, :, self.dim:2*self.dim] <= 0,  # 조건
+            torch.zeros_like(x_aug[:, :, self.dim:2*self.dim]),  # 조건이 True일 때 적용할 값
+            torch.ones_like(x_aug[:, :, self.dim:2*self.dim])  # 조건이 False일 때 적용할 값
+        )          
+        mask = x_aug[:, :, self.dim:2*self.dim]
+        mask = torch.cat((mask, mask), 2)
+        val = x_aug
+        # val = torch.where(mask == 1, x_aug, torch.zeros_like(x_aug))
+        
+        # if random.random() < 0.002:
+        #     # print(f"alpha : {self.alpha}")
+        #     # print(f"original tt : {combined_x[0, :, -1]}")
+        #     print(f"mask_raw: {x_copy[0, :, self.dim:2*self.dim]}")
+        #     print(f"tt : {time_steps[0]}")
+        #     print(f"mask : {mask.shape, mask[0]}")
+        #     print(f"val : {val.shape, val[0, :, :self.dim]}")
         
         if self.learn_emb:
             key = self.learn_time_embedding(time_steps).to(self.device)
@@ -135,17 +187,9 @@ class enc_mtan_rnn(nn.Module):
             query = self.fixed_time_embedding(self.query.unsqueeze(0)).to(self.device)
         
         # x: torch.Size([50, 203, 82]) key : torch.Size([50, 203, 128])
-        combined_x = torch.cat((x, key), dim=2)   
         
-        x_aug = self.aug(combined_x)
         
-        x_aug[:, :, self.dim:2*self.dim] = torch.round(x_aug[:, :, self.dim:2*self.dim])
-        
-        key_aug = x_aug[:, :, 2*self.dim:]
-        mask = x_aug[:, :, self.dim:2*self.dim]
-        mask = torch.cat((mask, mask), 2)
-        
-        out = self.att(query, key_aug, x_aug[:, :, :2*self.dim], mask)
+        out = self.att(query, key, val, mask)
         out, _ = self.gru_rnn(out)
         out = self.hiddens_to_z0(out)
         return out
