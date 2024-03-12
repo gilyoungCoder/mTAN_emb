@@ -6,6 +6,9 @@ import numpy as np
 from setmodels import SetTransformer
 import random
 
+torch.autograd.set_detect_anomaly(True)
+
+
 class create_classifier(nn.Module):
  
     def __init__(self, latent_dim, nhidden=16, N=2):
@@ -94,6 +97,8 @@ class TimeSeriesAugmentation(nn.Module):
         
         # 증폭된 숨겨진 표현을 (t, x) 형식으로 변환하기 위한 레이어
         self.final_transform = nn.Linear(hidden_dim, output_dim)
+        
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, t, x):
         # t와 x를 concatenate하여 초기 변환 레이어에 입력
@@ -104,7 +109,8 @@ class TimeSeriesAugmentation(nn.Module):
         augmented_representation = self.set_transformer(hidden_representation)
         
         # 증폭된 숨겨진 표현을 (t, x) 형식으로 변환
-        output = self.final_transform(augmented_representation)
+        augmented_output = self.final_transform(augmented_representation)
+        output = self.sigmoid(augmented_output)
         
         # 새로운 t와 x 분리
         new_x, new_t = output[ :, :, :self.dim-1], output[:, :, -1]
@@ -156,27 +162,28 @@ class enc_mtan_rnn(nn.Module):
     def forward(self, x, t):
         x_aug, time_steps = self.aug(t, x)
         
-        x_copy = x_aug.clone()
-
         time_steps = time_steps.cpu()
         
-        x_aug[:, :, self.dim:2*self.dim] = torch.where(
-            x_aug[:, :, self.dim:2*self.dim] <= 0,  # 조건
-            torch.zeros_like(x_aug[:, :, self.dim:2*self.dim]),  # 조건이 True일 때 적용할 값
-            torch.ones_like(x_aug[:, :, self.dim:2*self.dim])  # 조건이 False일 때 적용할 값
-        )          
+        x_copy = x_aug.clone()
+        
+        x_aug_updated = x_aug.clone()
+        x_aug_updated[:, :, self.dim:2*self.dim] = torch.where(
+            x_aug[:, :, self.dim:2*self.dim] <= 0,
+            torch.zeros_like(x_aug[:, :, self.dim:2*self.dim]),
+            torch.ones_like(x_aug[:, :, self.dim:2*self.dim])
+        )         
         mask = x_aug[:, :, self.dim:2*self.dim]
         mask = torch.cat((mask, mask), 2)
         val = x_aug
         # val = torch.where(mask == 1, x_aug, torch.zeros_like(x_aug))
         
-        # if random.random() < 0.002:
-        #     # print(f"alpha : {self.alpha}")
-        #     # print(f"original tt : {combined_x[0, :, -1]}")
-        #     print(f"mask_raw: {x_copy[0, :, self.dim:2*self.dim]}")
-        #     print(f"tt : {time_steps[0]}")
-        #     print(f"mask : {mask.shape, mask[0]}")
-        #     print(f"val : {val.shape, val[0, :, :self.dim]}")
+        if random.random() < 0.002:
+            # print(f"alpha : {self.alpha}")
+            # print(f"original tt : {combined_x[0, :, -1]}")
+            print(f"mask_raw: {x_copy[0, :, self.dim:2*self.dim]}")
+            print(f"tt : {time_steps[0]}")
+            print(f"mask : {mask.shape, mask[0]}")
+            print(f"val : {val.shape, val[0, :, :self.dim]}")
         
         if self.learn_emb:
             key = self.learn_time_embedding(time_steps).to(self.device)

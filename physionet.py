@@ -269,12 +269,12 @@ class PhysioNet(object):
 
     @property
     def raw_folder(self):
-        return os.path.join(self.root, self.__class__.__name__, "raw")
-
+        # return os.path.join(self.root, self.__class__.__name__, "raw")
+        return "../data/physionet/PhysioNet/raw"
     @property
     def processed_folder(self):
-        return os.path.join(self.root, self.__class__.__name__, "processed")
-
+        # return os.path.join(self.root, self.__class__.__name__, "processed")
+        return "../data/physionet/PhysioNet/processed"
     @property
     def training_file(self):
         return "set-a_{}.pt".format(self.quantization)

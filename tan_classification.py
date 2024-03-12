@@ -164,6 +164,7 @@ if __name__ == '__main__':
             label = label.unsqueeze(0).repeat_interleave(args.k_iwae, 0).view(-1)
             ce_loss = criterion(pred_y, label)
             loss = recon_loss + args.alpha*ce_loss
+            torch.nn.utils.clip_grad_norm_(rec.parameters(), 1e8)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
